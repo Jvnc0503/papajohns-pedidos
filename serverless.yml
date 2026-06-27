@@ -16,6 +16,9 @@ provider:
     OCI_WEBHOOK_URL: "https://tu-endpoint-oci.oraclecloud.com/webhook" # Cambiar por URL real
 
 functions:
+  saveToken:
+    handler: src/handlers/save_token.handler
+
   createOrder:
     handler: src/handlers/create_order.handler
     events:
@@ -244,48 +247,51 @@ resources:
         DefinitionString: !Sub |
           {
             "Comment": "Flujo de pedido Papa Johns - EDA Multi-tenant",
-            "StartAt": "Cocina",
+            "StartAt": "GuardarTokenCocina",
             "States": {
-              "Cocina": {
+              "GuardarTokenCocina": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::sns:publish.waitForTaskToken",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
                 "Parameters": {
-                  "TopicArn": "${SnsTopicCocina}",
-                  "Message": {
-                    "tenantId.$": "$.detail.tenantId",
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
                     "orderId.$": "$.detail.orderId",
+                    "tenantId.$": "$.detail.tenantId",
                     "stage": "COCINA",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
+                "ResultPath": null,
                 "Next": "Empaque"
               },
               "Empaque": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::sns:publish.waitForTaskToken",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
                 "Parameters": {
-                  "TopicArn": "${SnsTopicEmpaque}",
-                  "Message": {
-                    "tenantId.$": "$.detail.tenantId",
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
                     "orderId.$": "$.detail.orderId",
+                    "tenantId.$": "$.detail.tenantId",
                     "stage": "EMPAQUE",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
+                "ResultPath": null,
                 "Next": "Despacho"
               },
               "Despacho": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::sns:publish.waitForTaskToken",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
                 "Parameters": {
-                  "TopicArn": "${SnsTopicDespacho}",
-                  "Message": {
-                    "tenantId.$": "$.detail.tenantId",
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
                     "orderId.$": "$.detail.orderId",
+                    "tenantId.$": "$.detail.tenantId",
                     "stage": "DESPACHO",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
+                "ResultPath": null,
                 "Next": "Entregado"
               },
               "Entregado": {
