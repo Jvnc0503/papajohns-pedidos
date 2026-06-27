@@ -23,7 +23,8 @@ def handler(event, context):
 
     # Incluir taskToken si está pausado (ej. en una etapa intermedia)
     # Según tech_spec, getOrder debe retornar el taskToken actual para la interfaz de los trabajadores
-    if order["status"] != "ENTREGADO" and order["status"] != "RECEPCION":
-        order["taskToken"] = order["stages"].get(order["status"], {}).get("token") # Ajustar según cómo se guarde el token
+    if order["status"] not in ("ENTREGADO", "RECEPCION"):
+        current_stage = order["status"]
+        order["taskToken"] = order["stages"].get(current_stage, {}).get("taskToken")
 
     return ok(order)
