@@ -46,6 +46,15 @@ def handler(event, context):
 
     current_status = order["status"]
 
+    # --- MEJORA DE RESILIENCIA: Idempotencia ---
+    # Si el pedido ya está en el estado destino, retornar éxito sin procesar nada más.
+    if current_status == new_status:
+        return ok({
+            "message": f"El pedido ya se encuentra en el estado '{new_status}'",
+            "orderId": order_id,
+            "status": new_status,
+        })
+
     # Verificar que la transición es válida
     expected_prev = VALID_TRANSITIONS[new_status]
     if current_status != expected_prev:
@@ -73,41 +82,53 @@ def handler(event, context):
         ":resp":       responsable or "Sin asignar",
     }
 
-    table.update_item(
-        Key={"tenantId": tenant_id, "orderId": order_id},
-        UpdateExpression=update_expr,
-        ExpressionAttributeNames=expr_names,
-        ExpressionAttributeValues=expr_values,
-    )
+    try:
+        table.update_item(
+            Key={"tenantId": tenant_id, "orderId": order_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+    except Exception as e:
+        print(f"Error actualizando DynamoDB: {str(e)}")
+        return server_error("Error interno al actualizar la base de datos")
 
     # Notificar a Step Functions que la etapa fue completada
     if task_token:
-        sfn_client.send_task_success(
-            taskToken=task_token,
-            output=json.dumps({
-                "orderId":    order_id,
-                "prevStage":  current_status,
-                "nextStage":  new_status,
-                "completedAt": now,
-            }),
-        )
+        try:
+            sfn_client.send_task_success(
+                taskToken=task_token,
+                output=json.dumps({
+                    "orderId":    order_id,
+                    "prevStage":  current_status,
+                    "nextStage":  new_status,
+                    "completedAt": now,
+                }),
+            )
+        except Exception as e:
+            # Si falla SFN pero la DB ya se actualizó, logueamos el error. 
+            # En un sistema crítico, aquí podríamos considerar una compensación o reintento manual.
+            print(f"Error al notificar a Step Functions (Token: {task_token}): {str(e)}")
 
     # Emitir evento a EventBridge
-    events_client = boto3.client("events")
-    events_client.put_events(
-        Entries=[{
-            "Source": "com.papajohns.orders",
-            "DetailType": "OrderStatusUpdated",
-            "Detail": json.dumps({
-                "orderId": order_id,
-                "tenantId": tenant_id,
-                "newStatus": new_status,
-                "responsable": responsable,
-                "source": body.get("source", "DASHBOARD")
-            }),
-            "EventBusName": "default"
-        }]
-    )
+    try:
+        events_client = boto3.client("events")
+        events_client.put_events(
+            Entries=[{
+                "Source": "com.papajohns.orders",
+                "DetailType": "OrderStatusUpdated",
+                "Detail": json.dumps({
+                    "orderId": order_id,
+                    "tenantId": tenant_id,
+                    "newStatus": new_status,
+                    "responsable": responsable,
+                    "source": body.get("source", "DASHBOARD")
+                }),
+                "EventBusName": "default"
+            }]
+        )
+    except Exception as e:
+        print(f"Error al emitir evento a EventBridge: {str(e)}")
 
     return ok({
         "message":    f"Pedido actualizado a '{new_status}'",
