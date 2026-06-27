@@ -12,6 +12,10 @@ events_client = boto3.client("events")
 TABLE_NAME = os.environ["ORDERS_TABLE"]
 
 def handler(event, context):
+    tenant_id = (event.get("pathParameters") or {}).get("tenantId")
+    if not tenant_id:
+        return bad_request("Falta el parámetro 'tenantId' en la ruta")
+
     try:
         body = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
@@ -33,6 +37,7 @@ def handler(event, context):
 
     order = {
         "orderId":      order_id,
+        "tenantId":     tenant_id,
         "customerName": body["customerName"],
         "items":        items,
         "totalAmount":  body.get("totalAmount", 0),
@@ -52,6 +57,22 @@ def handler(event, context):
     # Guardar en DynamoDB
     table = dynamodb.Table(TABLE_NAME)
     table.put_item(Item=order)
+
+    # Emitir evento a EventBridge
+    events_client.put_events(
+        Entries=[{
+            "Source": "com.papajohns.orders",
+            "DetailType": "OrderCreated",
+            "Detail": json.dumps({
+                "orderId": order["orderId"],
+                "tenantId": order["tenantId"],
+                "customerName": order["customerName"],
+                "items": order["items"],
+                "source": order["source"]
+            }),
+            "EventBusName": "default"
+        }]
+    )
 
     return created({
         "message": "Pedido creado exitosamente",

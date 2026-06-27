@@ -12,9 +12,10 @@ TABLE_NAME = os.environ["ORDERS_TABLE"]
 
 
 def handler(event, context):
+    tenant_id = (event.get("pathParameters") or {}).get("tenantId")
     order_id = (event.get("pathParameters") or {}).get("id")
-    if not order_id:
-        return bad_request("Falta el parámetro 'id' en la ruta")
+    if not tenant_id or not order_id:
+        return bad_request("Faltan parámetros 'tenantId' o 'id' en la ruta")
 
     try:
         body = json.loads(event.get("body") or "{}")
@@ -35,13 +36,13 @@ def handler(event, context):
             f"Estados posibles: {list(VALID_TRANSITIONS.keys())}"
         )
 
-    # Obtener el pedido actual
+    # Obtener el pedido actual usando tenantId y orderId
     table = dynamodb.Table(TABLE_NAME)
-    result = table.get_item(Key={"orderId": order_id})
+    result = table.get_item(Key={"tenantId": tenant_id, "orderId": order_id})
     order = result.get("Item")
 
     if not order:
-        return not_found(f"No se encontró el pedido con id '{order_id}'")
+        return not_found(f"No se encontró el pedido con id '{order_id}' para el tenant '{tenant_id}'")
 
     current_status = order["status"]
 
@@ -73,7 +74,7 @@ def handler(event, context):
     }
 
     table.update_item(
-        Key={"orderId": order_id},
+        Key={"tenantId": tenant_id, "orderId": order_id},
         UpdateExpression=update_expr,
         ExpressionAttributeNames=expr_names,
         ExpressionAttributeValues=expr_values,
@@ -90,6 +91,23 @@ def handler(event, context):
                 "completedAt": now,
             }),
         )
+
+    # Emitir evento a EventBridge
+    events_client = boto3.client("events")
+    events_client.put_events(
+        Entries=[{
+            "Source": "com.papajohns.orders",
+            "DetailType": "OrderStatusUpdated",
+            "Detail": json.dumps({
+                "orderId": order_id,
+                "tenantId": tenant_id,
+                "newStatus": new_status,
+                "responsable": responsable,
+                "source": body.get("source", "DASHBOARD")
+            }),
+            "EventBusName": "default"
+        }]
+    )
 
     return ok({
         "message":    f"Pedido actualizado a '{new_status}'",
