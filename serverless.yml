@@ -1,0 +1,134 @@
+org: geraldocolchado
+service: papa-johns-order-service
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 1024
+  timeout: 30
+  iam:
+    role: arn:aws:iam::606646193182:role/LabRole
+  environment:
+    ORDERS_TABLE: ${self:service}-orders-${self:provider.stage}
+    STATE_MACHINE_ARN: !Ref OrderWorkflow
+
+functions:
+  saveToken:
+    handler: src/handlers/save_token.handler
+
+  createOrder:
+    handler: src/handlers/create_order.handler
+    events:
+      - http:
+          path: /orders
+          method: post
+          cors: true
+
+  getOrder:
+    handler: src/handlers/get_order.handler
+    events:
+      - http:
+          path: /orders/{id}
+          method: get
+          cors: true
+
+  updateOrderStatus:
+    handler: src/handlers/update_order_status.handler
+    events:
+      - http:
+          path: /orders/{id}/status
+          method: patch
+          cors: true
+
+resources:
+  Resources:
+    OrdersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.ORDERS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: orderId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: orderId
+            KeyType: HASH
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+
+    OrderWorkflow:
+      Type: AWS::StepFunctions::StateMachine
+      Properties:
+        StateMachineName: ${self:service}-workflow-${self:provider.stage}
+        RoleArn: arn:aws:iam::606646193182:role/LabRole
+        DefinitionString: !Sub |
+          {
+            "Comment": "Flujo de pedido Papa Johns",
+            "StartAt": "Recepcion",
+            "States": {
+              "Recepcion": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Parameters": {
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
+                    "orderId.$": "$.orderId",
+                    "stage": "RECEPCION",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "ResultPath": null,
+                "Next": "Cocina"
+              },
+              "Cocina": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Parameters": {
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
+                    "orderId.$": "$.orderId",
+                    "stage": "COCINA",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "ResultPath": null,
+                "Next": "Empaque"
+              },
+              "Empaque": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Parameters": {
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
+                    "orderId.$": "$.orderId",
+                    "stage": "EMPAQUE",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "ResultPath": null,
+                "Next": "Despacho"
+              },
+              "Despacho": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Parameters": {
+                  "FunctionName": "${SaveTokenLambdaFunction}",
+                  "Payload": {
+                    "orderId.$": "$.orderId",
+                    "stage": "DESPACHO",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "ResultPath": null,
+                "Next": "Entregado"
+              },
+              "Entregado": {
+                "Type": "Succeed"
+              }
+            }
+          }
