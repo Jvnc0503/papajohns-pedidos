@@ -1,8 +1,6 @@
 org: ${env:SLS_ORG}
 service: papa-johns-order-service
 
-frameworkVersion: "3"
-
 provider:
   name: aws
   runtime: python3.14
