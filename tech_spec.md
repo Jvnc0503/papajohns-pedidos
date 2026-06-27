@@ -54,3 +54,35 @@ Cada etapa de trabajo tiene:
 * POST /tenants/{tenantId}/orders: Inicia el flujo EDA.  
 * GET /tenants/{tenantId}/orders/{orderId}: Lectura de estado (Single Source of Truth: DynamoDB).  
 * PATCH /tenants/{tenantId}/orders/{orderId}/status: Resolución de callback para el flujo orquestado.
+
+## **6\. Componentes del Backend (Funciones Lambda)**
+
+A continuación, se detallan los 4 microservicios/funciones que componen la lógica del backend:
+
+### **1\. createOrder (Iniciador del Flujo)**
+
+* **Trigger:** API Gateway (POST /tenants/{tenantId}/orders).  
+* **Responsabilidad:** \* Recibe el payload inicial (del cliente web o de OCI/Rappi) y valida los datos.  
+  * Persiste el pedido en DynamoDB en estado inicial "RECEPCION", usando la clave particionada tenantId y de ordenación orderId.  
+  * Emite el evento asíncrono OrderCreated a EventBridge. No interactúa de forma síncrona con Step Functions.
+
+### **2\. getOrder (Consulta de Estado)**
+
+* **Trigger:** API Gateway (GET /tenants/{tenantId}/orders/{orderId}).  
+* **Responsabilidad:** \* Actúa como la única fuente de verdad (Single Source of Truth).  
+  * Retorna el detalle completo del pedido desde DynamoDB, incluyendo las marcas de tiempo (startedAt, endedAt), el responsable actual y, si existe y está pausado, el taskToken actual para la interfaz de los trabajadores.
+
+### **3\. updateOrderStatus (Resolución de Callback)**
+
+* **Trigger:** API Gateway (PATCH /tenants/{tenantId}/orders/{orderId}/status).  
+* **Responsabilidad:** \* Es invocada por el dashboard de trabajadores. Recibe el taskToken y el nuevo estado (ej. de RECEPCION a COCINA).  
+  * Actualiza los metadatos transaccionales (tiempos de transición, responsable) en DynamoDB.  
+  * Realiza el llamado a stepfunctions.send\_task\_success() utilizando el taskToken, lo cual desbloquea y avanza la máquina de estados.  
+  * Emite el evento OrderStatusUpdated a EventBridge.
+
+### **4\. notifyService (Integración Externa y Persistencia Estática)**
+
+* **Trigger:** EventBridge Rule (Escucha eventos OrderStatusUpdated).  
+* **Responsabilidad:** \* Lógica totalmente desacoplada para tareas finales.  
+  * Si detecta que source \== "RAPPI", realiza una petición POST de webhook hacia Oracle OCI (Nube Secundaria) notificando el nuevo estado.  
+  * Si el estado transitado es "ENTREGADO", genera un comprobante estructurado en JSON (recibo) y lo almacena de forma inmutable en Amazon S3.
