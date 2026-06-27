@@ -234,13 +234,13 @@ resources:
         Targets:
           - Arn: !Ref OrderWorkflow
             Id: "TriggerOrderWorkflow"
-            RoleArn: arn:aws:iam::606646193182:role/LabRole
+            RoleArn: arn:aws:iam::${aws:accountId}:role/LabRole
 
     OrderWorkflow:
       Type: AWS::StepFunctions::StateMachine
       Properties:
         StateMachineName: ${self:service}-workflow-${self:provider.stage}
-        RoleArn: arn:aws:iam::606646193182:role/LabRole
+        RoleArn: arn:aws:iam::${aws:accountId}:role/LabRole
         DefinitionString: !Sub |
           {
             "Comment": "Flujo de pedido Papa Johns - EDA Multi-tenant",
