@@ -12,7 +12,6 @@ events_client = boto3.client("events")
 
 TABLE_NAME = os.environ["ORDERS_TABLE"]
 
-
 def float_to_decimal(obj):
     """Convierte recursivamente todos los float a Decimal para DynamoDB."""
     if isinstance(obj, float):
@@ -94,10 +93,4 @@ def handler(event, context):
         "message": "Pedido creado exitosamente",
         "orderId": order_id,
         "status":  "RECEPCION",
-    })
-
-    return created({
-        "message": "Pedido creado exitosamente",
-        "orderId": order_id,
-        "status":  order["status"],
     })

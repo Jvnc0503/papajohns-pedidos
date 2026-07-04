@@ -10,7 +10,6 @@ sfn_client = boto3.client("stepfunctions")
 
 TABLE_NAME = os.environ["ORDERS_TABLE"]
 
-
 def handler(event, context):
     tenant_id = (event.get("pathParameters") or {}).get("tenantId")
     order_id = (event.get("pathParameters") or {}).get("id")
@@ -57,10 +56,16 @@ def handler(event, context):
 
     # Verificar que la transición es válida
     expected_prev = VALID_TRANSITIONS[new_status]
-    if current_status != expected_prev:
+    
+    is_valid_transition = (
+        current_status in expected_prev if isinstance(expected_prev, list) 
+        else current_status == expected_prev
+    )
+
+    if not is_valid_transition:
         return bad_request(
             f"Transición inválida: el pedido está en '{current_status}', "
-            f"pero para pasar a '{new_status}' debe estar en '{expected_prev}'"
+            f"y no puede pasar a '{new_status}'"
         )
 
     now = datetime.now(timezone.utc).isoformat()
