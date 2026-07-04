@@ -2,87 +2,62 @@
 
 ## **1\. Visión General**
 
-Sistema Serverless EDA (Event Driven Architecture) multi-tenant desarrollado sobre AWS, con integración Multi-nube (Oracle OCI). El sistema gestiona el ciclo de vida de un pedido de comida rápida desde la recepción hasta la entrega, utilizando orquestación de tareas humanas mediante Step Functions.
+Sistema Serverless EDA (Event Driven Architecture) multi-tenant desarrollado sobre AWS, con integración Multi-nube (Oracle OCI). El sistema gestiona el ciclo de vida de un pedido de comida rápida desde la recepción hasta la entrega o cancelación, utilizando orquestación de tareas humanas y resolución automatizada de fallos.
 
 ## **2\. Pila Tecnológica (Stack)**
 
 * **Cloud Core:** AWS (Amplify, API Gateway, EventBridge, Step Functions, Lambda, DynamoDB, S3, SNS, SQS).  
 * **Cloud Secundaria:** Oracle OCI (Oracle Functions para integración Rappi).  
 * **Patrón de Orquestación:** Wait for Callback with Task Token.  
-* **Comunicación:** EventBridge para eventos asíncronos y SNS/SQS (Fan-out) para distribución de tareas.
+* **Patrón de Mensajería:** Pub/Sub (Fan-out) y Message Queuing.
 
 ## **3\. Especificaciones Funcionales (Lógica de Negocio)**
 
-1. **Multi-tenancy:** Los pedidos deben estar aislados por un tenantId (ID de sucursal).  
-2. **Flujo de Trabajo:** Recepción \-\> Cocina \-\> Empaque \-\> Despacho \-\> Entregado.  
-3. **Persistencia:** DynamoDB indexada por tenantId y orderId.  
-4. **Integración Externa:** \* Origen "RAPPI" desde OCI: Dispara Webhook de retorno.  
-   * Estado "ENTREGADO": Genera archivo JSON inmutable en S3.
+1. **Multi-tenancy:** Los pedidos están aislados lógicamente por un tenantId.  
+2. **Flujos Ramificados:** \* **Flujo Feliz:** Recepción \-\> Cocina \-\> Empaque \-\> Despacho \-\> Entregado.  
+   * **Excepciones:** El sistema permite desvíos hacia CANCELADO (decisión humana) o ABANDONO\_OPERATIVO (timeout del sistema).  
+3. **Persistencia:** DynamoDB indexada por tenantId (Partition Key) y orderId (Sort Key).
 
-## **4\. Detalles de Implementación (Para Agentes LLM)**
+## **4\. Detalles de Implementación Arquitectónica**
 
-### **A. Eventos del Sistema (EventBridge Schema)**
+### **A. Eventos del Sistema (EventBridge)**
 
-* **Event Type: OrderCreated**  
-  * Payload: {orderId, tenantId, customerName, items, source}  
-* **Event Type: OrderStatusUpdated**  
-  * Payload: {orderId, tenantId, newStatus, responsable, source}
+* **Event Type: OrderCreated** \-\> Inicia la ejecución de la Step Function.  
+* **Event Type: OrderStatusUpdated** \-\> Gatilla notificaciones externas.
 
-### **B. Orquestación y Task Tokens**
+### **B. Orquestación Avanzada (Step Functions)**
 
-La máquina de estados de Step Functions debe definir cada etapa (Cocina, Empaque, Despacho) con el recurso:  
-"Resource": "arn:aws:states:::sns:publish.waitForTaskToken"
+* **Integración Nativa:** Utiliza "Resource": "arn:aws:states:::sns:publish.waitForTaskToken" para inyectar el token directo al bus de mensajes.  
+* **Nodos Choice:** Evalúan la respuesta del trabajador ($.resultadoTrabajador.nextStage). Si es "CANCELADO", el flujo finaliza anticipadamente.  
+* **Nodos Catch:** Atrapan errores "WORKER\_TIMEOUT" inyectados por la DLQ para cerrar transacciones abandonadas.
 
-* **Importante:** El taskToken es obligatorio para que el sistema "sepa" cuándo el trabajador ha terminado la tarea manualmente a través del PATCH /orders/{id}/status.
+### **C. Tolerancia a Fallos (Patrón DLQ y Remediation)**
 
-### **C. Patrón Fan-out SNS/SQS**
+Cada etapa (Cocina, Empaque, Despacho) posee una SQS y una DLQ. Si un trabajador no resuelve el pedido tras 3 intentos (maxReceiveCount: 3), el mensaje envenenado pasa a la DLQ, donde una Lambda rescatista cierra el ciclo operativamente.
 
-Cada etapa de trabajo tiene:
+## **5\. Componentes del Backend (Funciones Lambda)**
 
-1. **SNS Topic:** Dedicado (ej. SNS-Cocina).  
-2. **SQS Queue:** Cola de trabajo vinculada al tópico.  
-3. **DLQ (Dead Letter Queue):** Cola de errores asociada con maxReceiveCount: 3 en la RedrivePolicy.
-
-### **D. Seguridad y Tolerancia a Fallos**
-
-* **IAM:** Las Lambdas de updateOrderStatus deben tener permisos states:SendTaskSuccess.  
-* **Resiliencia:** El uso de DLQ es obligatorio para todos los flujos de trabajo humano.  
-* **Idempotencia:** El taskToken garantiza que el estado de un pedido solo pueda avanzar si el token es válido y no ha sido procesado previamente.
-
-## **5\. Endpoints de API (Contract)**
-
-* POST /tenants/{tenantId}/orders: Inicia el flujo EDA.  
-* GET /tenants/{tenantId}/orders/{orderId}: Lectura de estado (Single Source of Truth: DynamoDB).  
-* PATCH /tenants/{tenantId}/orders/{orderId}/status: Resolución de callback para el flujo orquestado.
-
-## **6\. Componentes del Backend (Funciones Lambda)**
-
-A continuación, se detallan los 4 microservicios/funciones que componen la lógica del backend:
-
-### **1\. createOrder (Iniciador del Flujo)**
+### **1\. createOrder (Productor de Eventos)**
 
 * **Trigger:** API Gateway (POST /tenants/{tenantId}/orders).  
-* **Responsabilidad:** \* Recibe el payload inicial (del cliente web o de OCI/Rappi) y valida los datos.  
-  * Persiste el pedido en DynamoDB en estado inicial "RECEPCION", usando la clave particionada tenantId y de ordenación orderId.  
-  * Emite el evento asíncrono OrderCreated a EventBridge. No interactúa de forma síncrona con Step Functions.
+* **Responsabilidad:** Valida payload, inicializa el pedido en DynamoDB y emite el evento asíncrono a EventBridge. No acopla la respuesta al inicio del orquestador.
 
-### **2\. getOrder (Consulta de Estado)**
+### **2\. getOrder (Read Model)**
 
 * **Trigger:** API Gateway (GET /tenants/{tenantId}/orders/{orderId}).  
-* **Responsabilidad:** \* Actúa como la única fuente de verdad (Single Source of Truth).  
-  * Retorna el detalle completo del pedido desde DynamoDB, incluyendo las marcas de tiempo (startedAt, endedAt), el responsable actual y, si existe y está pausado, el taskToken actual para la interfaz de los trabajadores.
+* **Responsabilidad:** Actúa como Single Source of Truth para consultas de los clientes web. Lee desde DynamoDB. No gestiona ni expone Task Tokens.
 
-### **3\. updateOrderStatus (Resolución de Callback)**
+### **3\. updateOrderStatus (Resolución de Orquestación)**
 
 * **Trigger:** API Gateway (PATCH /tenants/{tenantId}/orders/{orderId}/status).  
-* **Responsabilidad:** \* Es invocada por el dashboard de trabajadores. Recibe el taskToken y el nuevo estado (ej. de RECEPCION a COCINA).  
-  * Actualiza los metadatos transaccionales (tiempos de transición, responsable) en DynamoDB.  
-  * Realiza el llamado a stepfunctions.send\_task\_success() utilizando el taskToken, lo cual desbloquea y avanza la máquina de estados.  
-  * Emite el evento OrderStatusUpdated a EventBridge.
+* **Responsabilidad:** Invocada por el dashboard web. Actualiza DynamoDB (marcas de tiempo), asegura la idempotencia y utiliza el taskToken para ejecutar send\_task\_success(), permitiendo a Step Functions evaluar el siguiente paso.
 
-### **4\. notifyService (Integración Externa y Persistencia Estática)**
+### **4\. notifyService (Consumidor Desacoplado)**
 
-* **Trigger:** EventBridge Rule (Escucha eventos OrderStatusUpdated).  
-* **Responsabilidad:** \* Lógica totalmente desacoplada para tareas finales.  
-  * Si detecta que source \== "RAPPI", realiza una petición POST de webhook hacia Oracle OCI (Nube Secundaria) notificando el nuevo estado.  
-  * Si el estado transitado es "ENTREGADO", genera un comprobante estructurado en JSON (recibo) y lo almacena de forma inmutable en Amazon S3.
+* **Trigger:** EventBridge Rule (OrderStatusUpdated).  
+* **Responsabilidad:** Si el origen es "RAPPI", ejecuta un webhook POST hacia OCI. Si el estado es "ENTREGADO", genera un JSON estático en S3.
+
+### **5\. processDlq (Remediación Automatizada)**
+
+* **Trigger:** Colas SQS (DlqCocina, DlqEmpaque, DlqDespacho).  
+* **Responsabilidad:** Consume mensajes abandonados del mundo físico. Actualiza la BD con estado de error crítico y ejecuta send\_task\_failure() hacia Step Functions para liberar el flujo suspendido.
