@@ -13,12 +13,9 @@ provider:
   environment:
     ORDERS_TABLE: ${self:service}-orders-${self:provider.stage}
     RECEIPTS_BUCKET: ${self:service}-receipts-${self:provider.stage}
-    OCI_WEBHOOK_URL: "https://tu-endpoint-oci.oraclecloud.com/webhook" # Cambiar por URL real
+    OCI_WEBHOOK_URL: "https://tu-endpoint-oci.oraclecloud.com/webhook"
 
 functions:
-  saveToken:
-    handler: src/handlers/save_token.handler
-
   createOrder:
     handler: src/handlers/create_order.handler
     events:
@@ -35,14 +32,6 @@ functions:
           method: get
           cors: true
 
-  updateOrderStatus:
-    handler: src/handlers/update_order_status.handler
-    events:
-      - http:
-          path: /tenants/{tenantId}/orders/{id}/status
-          method: patch
-          cors: true
-
   notifyService:
     handler: src/handlers/notify_service.handler
     events:
@@ -53,6 +42,19 @@ functions:
               - "com.papajohns.orders"
             detail-type:
               - "OrderStatusUpdated"
+              
+  processDlq:
+    handler: src/handlers/process_dlq.handler
+    events:
+      - sqs:
+          arn: !GetAtt DlqCocina.Arn
+          batchSize: 10
+      - sqs:
+          arn: !GetAtt DlqEmpaque.Arn
+          batchSize: 10
+      - sqs:
+          arn: !GetAtt DlqDespacho.Arn
+          batchSize: 10
 
 resources:
   Resources:
@@ -246,53 +248,103 @@ resources:
         RoleArn: arn:aws:iam::${aws:accountId}:role/LabRole
         DefinitionString: !Sub |
           {
-            "Comment": "Flujo de pedido Papa Johns - EDA Multi-tenant",
-            "StartAt": "GuardarTokenCocina",
+            "Comment": "Flujo ramificado con manejo de DLQ - Papa Johns",
+            "StartAt": "Cocina",
             "States": {
-              "GuardarTokenCocina": {
+              "Cocina": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Resource": "arn:aws:states:::sns:publish.waitForTaskToken",
                 "Parameters": {
-                  "FunctionName": "${SaveTokenLambdaFunction}",
-                  "Payload": {
-                    "orderId.$": "$.detail.orderId",
+                  "TopicArn": "${SnsTopicCocina}",
+                  "Message": {
                     "tenantId.$": "$.detail.tenantId",
+                    "orderId.$": "$.detail.orderId",
                     "stage": "COCINA",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
-                "ResultPath": null,
-                "Next": "Empaque"
+                "ResultPath": "$.resultadoTrabajador",
+                "Catch": [
+                  {
+                    "ErrorEquals": ["WORKER_TIMEOUT"],
+                    "Next": "PedidoAbandonado"
+                  }
+                ],
+                "Next": "EvaluarDecisionCocina"
+              },
+              "EvaluarDecisionCocina": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.resultadoTrabajador.nextStage",
+                    "StringEquals": "CANCELADO",
+                    "Next": "PedidoCancelado"
+                  }
+                ],
+                "Default": "Empaque"
               },
               "Empaque": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Resource": "arn:aws:states:::sns:publish.waitForTaskToken",
                 "Parameters": {
-                  "FunctionName": "${SaveTokenLambdaFunction}",
-                  "Payload": {
-                    "orderId.$": "$.detail.orderId",
+                  "TopicArn": "${SnsTopicEmpaque}",
+                  "Message": {
                     "tenantId.$": "$.detail.tenantId",
+                    "orderId.$": "$.detail.orderId",
                     "stage": "EMPAQUE",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
-                "ResultPath": null,
-                "Next": "Despacho"
+                "ResultPath": "$.resultadoTrabajador",
+                "Catch": [
+                  {
+                    "ErrorEquals": ["WORKER_TIMEOUT"],
+                    "Next": "PedidoAbandonado"
+                  }
+                ],
+                "Next": "EvaluarDecisionEmpaque"
+              },
+              "EvaluarDecisionEmpaque": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.resultadoTrabajador.nextStage",
+                    "StringEquals": "CANCELADO",
+                    "Next": "PedidoCancelado"
+                  }
+                ],
+                "Default": "Despacho"
               },
               "Despacho": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                "Resource": "arn:aws:states:::sns:publish.waitForTaskToken",
                 "Parameters": {
-                  "FunctionName": "${SaveTokenLambdaFunction}",
-                  "Payload": {
-                    "orderId.$": "$.detail.orderId",
+                  "TopicArn": "${SnsTopicDespacho}",
+                  "Message": {
                     "tenantId.$": "$.detail.tenantId",
+                    "orderId.$": "$.detail.orderId",
                     "stage": "DESPACHO",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
-                "ResultPath": null,
+                "ResultPath": "$.resultadoTrabajador",
+                "Catch": [
+                  {
+                    "ErrorEquals": ["WORKER_TIMEOUT"],
+                    "Next": "PedidoAbandonado"
+                  }
+                ],
                 "Next": "Entregado"
+              },
+              "PedidoCancelado": {
+                "Type": "Fail",
+                "Cause": "El trabajador rechazo el pedido o fue cancelado por el cliente.",
+                "Error": "ORDER_CANCELLED"
+              },
+              "PedidoAbandonado": {
+                "Type": "Fail",
+                "Cause": "El pedido fue abandonado operativamente y procesado por la DLQ.",
+                "Error": "ABANDONO_OPERATIVO"
               },
               "Entregado": {
                 "Type": "Succeed"

@@ -1,14 +1,13 @@
 import json
 
-# Etapas válidas del flujo de pedido (en orden)
-STAGES = ["RECEPCION", "COCINA", "EMPAQUE", "DESPACHO", "ENTREGADO"]
+STAGES = ["RECEPCION", "COCINA", "EMPAQUE", "DESPACHO", "ENTREGADO", "CANCELADO"]
 
-# Transiciones permitidas: de qué estado puede venir cada nuevo estado
 VALID_TRANSITIONS = {
     "COCINA":    "RECEPCION",
     "EMPAQUE":   "COCINA",
     "DESPACHO":  "EMPAQUE",
     "ENTREGADO": "DESPACHO",
+    "CANCELADO": ["RECEPCION", "COCINA"]
 }
 
 
