@@ -32,14 +32,6 @@ functions:
           method: get
           cors: true
 
-  updateOrderStatus:
-    handler: src/handlers/update_order_status.handler
-    events:
-      - http:
-          path: /tenants/{tenantId}/orders/{id}/status
-          method: patch
-          cors: true
-
   notifyService:
     handler: src/handlers/notify_service.handler
     events:
@@ -50,6 +42,7 @@ functions:
               - "com.papajohns.orders"
             detail-type:
               - "OrderStatusUpdated"
+              
   processDlq:
     handler: src/handlers/process_dlq.handler
     events:
