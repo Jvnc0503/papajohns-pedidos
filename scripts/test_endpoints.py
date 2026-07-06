@@ -35,25 +35,9 @@ def test_get_order(order_id: str):
     except Exception as e:
         print(f"Error: {e}")
 
-def test_update_order_status(order_id: str):
-    url = f"{BASE_URL}/tenants/tenant123/orders/{order_id}/status"
-    payload = {
-        "status": "COCINA",
-        "responsable": "Chef Juan",
-        "taskToken": "mock-token-123"
-    }
-    print(f"\n--- Testing Update Order Status to COCINA ---")
-    try:
-        response = requests.patch(url, json=payload)
-        print(f"Status Code: {response.status_code}")
-        print(f"Response: {response.json()}")
-    except Exception as e:
-        print(f"Error: {e}")
-
 if __name__ == "__main__":
     # Note: You need to replace the order_id in test_get_order and test_update_order_status 
     # with the ID returned by test_create_order if running sequentially.
     test_create_order()
     # Manual step: Update the IDs below after seeing the output of createOrder
-    # test_get_order("d8a9a166-9c5e-4f76-9bdd-7ff4a3598dc4")
-    # test_update_order_status("d8a9a166-9c5e-4f76-9bdd-7ff4a3598dc4")
+    # test_get_order("267c290f-1f6d-4df8-8743-ea96ead3c2b0")
