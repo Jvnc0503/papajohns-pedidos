@@ -21,10 +21,10 @@ provider:
 
 functions:
   customAuthorizer:
-    handler: src/handlers/auth/authorizer.handler
+    handler: src/handlers/authorizer.handler
 
   registerUser:
-    handler: src/handlers/auth/register.handler
+    handler: src/handlers/register.handler
     events:
       - http:
           path: /auth/register
@@ -32,7 +32,7 @@ functions:
           cors: true
 
   loginUser:
-    handler: src/handlers/auth/login.handler
+    handler: src/handlers/login.handler
     events:
       - http:
           path: /auth/login
