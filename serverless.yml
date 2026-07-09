@@ -116,6 +116,10 @@ resources:
             AttributeType: S
           - AttributeName: orderId
             AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
         KeySchema:
           - AttributeName: tenantId
             KeyType: HASH
