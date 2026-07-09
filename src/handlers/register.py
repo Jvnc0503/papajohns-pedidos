@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 from src.auth_utils import hash_password
+from src.utils import created, bad_request
 
 dynamodb = boto3.resource('dynamodb')
 USERS_TABLE = os.environ['USERS_TABLE']
@@ -13,13 +14,13 @@ def handler(event, context):
     name = body.get('name', 'Usuario')
 
     if not email or not password:
-        return {"statusCode": 400, "body": json.dumps({"error": "Falta email o password"})}
+        return bad_request("Falta email o password")
 
     table = dynamodb.Table(USERS_TABLE)
     
     # Verificar si ya existe
     if 'Item' in table.get_item(Key={'email': email}):
-        return {"statusCode": 400, "body": json.dumps({"error": "El usuario ya existe"})}
+        return bad_request("El usuario ya existe")
 
     # Guardar nuevo usuario
     table.put_item(Item={
@@ -28,4 +29,4 @@ def handler(event, context):
         'passwordHash': hash_password(password)
     })
 
-    return {"statusCode": 201, "body": json.dumps({"message": "Usuario registrado exitosamente"})}
+    return created({"message": "Usuario registrado exitosamente"})

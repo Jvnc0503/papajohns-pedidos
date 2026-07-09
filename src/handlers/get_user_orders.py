@@ -1,7 +1,7 @@
-import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key
+from src.utils import ok, server_error, response
 
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ['ORDERS_TABLE']
@@ -12,23 +12,20 @@ def handler(event, context):
     user_email = authorizer.get('principalId')
 
     if not user_email:
-        return {"statusCode": 401, "body": json.dumps({"error": "No autorizado"})}
+        return response(401, {"error": "No autorizado"})
 
     try:
         table = dynamodb.Table(TABLE_NAME)
         
         # Buscar en el Global Secondary Index usando el correo del usuario
-        response = table.query(
+        db_response = table.query(
             IndexName='UserOrdersIndex',
             KeyConditionExpression=Key('userId').eq(user_email),
             ScanIndexForward=False # Trae los más recientes primero
         )
         
-        return {
-            "statusCode": 200,
-            "headers": {"Access-Control-Allow-Origin": "*"},
-            "body": json.dumps({"orders": response.get('Items', [])}, default=str)
-        }
+        return ok({"orders": db_response.get('Items', [])})
+        
     except Exception as e:
         print(f"Error consultando DB: {str(e)}")
-        return {"statusCode": 500, "body": json.dumps({"error": "Error interno"})}
+        return server_error("Error interno al consultar historial")
