@@ -1,6 +1,8 @@
 org: ${env:SLS_ORG}
 service: papa-johns-order-service
 
+useDotenv: true
+
 provider:
   name: aws
   runtime: python3.14
@@ -13,7 +15,7 @@ provider:
   environment:
     ORDERS_TABLE: ${self:service}-orders-${self:provider.stage}
     RECEIPTS_BUCKET: ${self:service}-receipts-${self:provider.stage}
-    OCI_WEBHOOK_URL: "https://tu-endpoint-oci.oraclecloud.com/webhook"
+    OCI_WEBHOOK_URL: ${env.OCI_WEBHOOK_URL}
 
 functions:
   createOrder:
