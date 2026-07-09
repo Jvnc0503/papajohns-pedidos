@@ -17,11 +17,10 @@ order-service/
 ├── src/  
 │   ├── utils.py                    \# Constantes de estados y helpers HTTP  
 │   └── handlers/  
-│       ├── create\_order.py         \# POST /orders (Emite OrderCreated)  
-│       ├── get\_order.py            \# GET /orders/{id} (Single Source of Truth)  
-│       ├── update\_order\_status.py  \# PATCH /orders/{id}/status (Desbloquea Workflow)  
-│       ├── notify\_service.py       \# Consumidor EventBridge (S3 y Webhook OCI)  
-│       └── process\_dlq.py          \# Consumidor SQS (Remediación de DLQs)
+│       ├── create_order.py         \# POST /tenants/{tenantId}/orders (Emite OrderCreated)  
+│       ├── get_order.py            \# GET /tenants/{tenantId}/orders/{id} (Single Source of Truth)  
+│       ├── notify_service.py       \# Consumidor EventBridge (S3 y Webhook OCI)  
+│       └── process_dlq.py          \# Consumidor SQS (Remediación de DLQs)
 
 ## **Endpoints Principales**
 
