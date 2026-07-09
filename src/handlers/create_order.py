@@ -33,24 +33,25 @@ def handler(event, context):
     except json.JSONDecodeError:
         return bad_request("El body no es JSON válido")
 
-    # Validación de campos obligatorios
-    required_fields = ["customerName", "items"]
-    missing = [f for f in required_fields if f not in body]
-    if missing:
-        return bad_request(f"Faltan campos obligatorios: {', '.join(missing)}")
+    # Validación de campo obligatorios
+    if "items" not in body:
+        return bad_request("Falta el campo 'items' en el body")
 
     items = body["items"]
     if not isinstance(items, list) or len(items) == 0:
         return bad_request("'items' debe ser una lista con al menos un producto")
+    
+    authorizer = event.get('requestContext', {}).get('authorizer', {})
+    user_email = authorizer.get('principalId', 'anonimo@papajohns.com')
 
     # Construir el pedido
     order_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
     order = {
-        "orderId":      order_id,
         "tenantId":     tenant_id,
-        "customerName": body["customerName"],
+        "orderId":      order_id,
+        "userId":       user_email,
         "items":        items,
         "totalAmount":  body.get("totalAmount", 0),
         "source":       body.get("source", "WEB"),
@@ -79,9 +80,9 @@ def handler(event, context):
             "Source": "com.papajohns.orders",
             "DetailType": "OrderCreated",
             "Detail": json.dumps({
-                "orderId":      order_id,
                 "tenantId":     tenant_id,
-                "customerName": body["customerName"],
+                "orderId":      order_id,
+                "userId":       user_email,
                 "items":        body["items"],
                 "source":       body.get("source", "WEB"),
             }),

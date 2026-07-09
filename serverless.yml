@@ -1,6 +1,8 @@
 org: ${env:SLS_ORG}
 service: papa-johns-order-service
 
+useDotenv: true
+
 provider:
   name: aws
   runtime: python3.14
@@ -13,9 +15,30 @@ provider:
   environment:
     ORDERS_TABLE: ${self:service}-orders-${self:provider.stage}
     RECEIPTS_BUCKET: ${self:service}-receipts-${self:provider.stage}
-    OCI_WEBHOOK_URL: ${env.OCI_WEBHOOK_URL}
+    USERS_TABLE: ${self:service}-users-${self:provider.stage}
+    OCI_WEBHOOK_URL: ${env:OCI_WEBHOOK_URL}
+    JWT_SECRET: ${env:JWT_SECRET}
 
 functions:
+  customAuthorizer:
+    handler: src/handlers/auth/authorizer.handler
+
+  registerUser:
+    handler: src/handlers/auth/register.handler
+    events:
+      - http:
+          path: /auth/register
+          method: post
+          cors: true
+
+  loginUser:
+    handler: src/handlers/auth/login.handler
+    events:
+      - http:
+          path: /auth/login
+          method: post
+          cors: true
+
   createOrder:
     handler: src/handlers/create_order.handler
     events:
@@ -23,6 +46,16 @@ functions:
           path: /tenants/{tenantId}/orders
           method: post
           cors: true
+          authorizer: customAuthorizer
+
+  getUserOrders:
+    handler: src/handlers/get_user_orders.handler
+    events:
+      - http:
+          path: /tenants/{tenantId}/users/me/orders
+          method: get
+          cors: true
+          authorizer: customAuthorizer
 
   getOrder:
     handler: src/handlers/get_order.handler
@@ -61,6 +94,18 @@ resources:
     # ---------------------------------------------------------
     # 1. BASES DE DATOS Y ALMACENAMIENTO
     # ---------------------------------------------------------
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.USERS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: email
+            KeyType: HASH
+
     OrdersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -76,6 +121,15 @@ resources:
             KeyType: HASH
           - AttributeName: orderId
             KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: UserOrdersIndex
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
 
     ReceiptsBucket:
       Type: AWS::S3::Bucket
