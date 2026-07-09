@@ -1,0 +1,188 @@
+openapi: 3.0.3
+info:
+  title: Papa Johns Order Service API
+  description: API for managing orders in the Papa Johns delivery system.
+  version: 1.0.0
+servers:
+  - url: https://api.papajohns.com/tenants
+    description: Production server
+
+paths:
+  /{tenantId}/orders:
+    post:
+      summary: Create a new order
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOrderResponse'
+        '400':
+          description: Bad request - missing fields or invalid JSON
+        '500':
+          description: Internal server error
+
+  /{tenantId}/orders/{id}:
+    get:
+      summary: Get order details by ID
+      operationId: getOrder
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          description: Unique identifier for the tenant
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier for the order
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: Order not found
+        '400':
+          description: Bad request - missing path parameters
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    CreateOrderRequest:
+      type: object
+      required:
+        - customerName
+        - items
+      properties:
+        customerName:
+          type: string
+          example: "John Doe"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        totalAmount:
+          type: number
+          default: 0
+        source:
+          type: string
+          default: WEB
+
+    OrderItem:
+      type: object
+      properties:
+        name:
+          type: string
+        quantity:
+          type: integer
+        price:
+          type: number
+
+    CreateOrderResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        orderId:
+          type: string
+        status:
+          type: string
+
+    Order:
+      type: object
+      properties:
+        orderId:
+          type: string
+        tenantId:
+          type: string
+        customerName:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        totalAmount:
+          type: number
+        source:
+          type: string
+        status:
+          type: string
+        stages:
+          type: object
+          properties:
+            RECEPCION:
+              type: object
+              properties:
+                startedAt:
+                  type: string
+                  format: date-time
+                endedAt:
+                  type: string
+                  format: date-time
+                responsable:
+                  type: string
+            COCINA:
+              type: object
+              properties:
+                startedAt:
+                  type: string
+                  format: date-time
+                endedAt:
+                  type: string
+                  format: date-time
+                responsable:
+                  type: string
+            EMPAQUE:
+              type: object
+              properties:
+                startedAt:
+                  type: string
+                  format: date-time
+                endedAt:
+                  type: string
+                  format: date-time
+                responsable:
+                  type: string
+            DESPACHO:
+              type: object
+              properties:
+                startedAt:
+                  type: string
+                  format: date-time
+                endedAt:
+                  type: string
+                  format: date-time
+                responsable:
+                  type: string
+            ENTREGADO:
+              type: object
+              properties:
+                startedAt:
+                  type: string
+                  format: date-time
+                endedAt:
+                  type: string
+                  format: date-time
+                responsable:
+                  type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
